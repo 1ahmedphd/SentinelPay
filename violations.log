@@ -1,0 +1,5 @@
+{"transaction_id": "N/A", "violation_type": "Full PAN stored", "timestamp": "2023-04-17T18:56:39Z", "confidence_score": 1.0}
+{"transaction_id": "N/A", "violation_type": "CVV in log", "timestamp": "2023-04-17T18:56:39Z", "confidence_score": 1.0}
+{"transaction_id": "N/A", "violation_type": "Full PAN stored", "timestamp": "2023-04-17T18:56:09Z", "confidence_score": 1.0}
+{"transaction_id": "N/A", "violation_type": "CVV in log", "timestamp": "2023-04-17T18:56:09Z", "confidence_score": 1.0}
+{"transaction_id": "N/A", "violation_type": "Expiration date in log", "timestamp": "2023-04-17T18:56:09Z", "confidence_score": 0.9}

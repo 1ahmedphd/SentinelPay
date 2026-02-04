@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 
-# Day 5-7: Design Data Models
-
 @dataclass
 class RawTransaction:
     """

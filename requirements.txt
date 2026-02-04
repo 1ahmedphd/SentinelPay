@@ -1,2 +1,4 @@
 faker
 ollama
+pylatex
+fpdf

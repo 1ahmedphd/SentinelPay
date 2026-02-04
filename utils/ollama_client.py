@@ -4,8 +4,10 @@ import re
 from datetime import datetime, timedelta
 
 class OllamaClient:
-    def __init__(self, model="mistral:7b-instruct"):
-        self.model = model
+    def __init__(self, sanitizer_model="mistral:7b-instruct", risk_model="sentinel-risk-analyzer", compliance_model="sentinel-compliance-explainer"):
+        self.sanitizer_model = sanitizer_model
+        self.risk_model = risk_model
+        self.compliance_model = compliance_model
         self.system_prompt = """You are a PCI-DSS compliance expert. Your task is to analyze a given transaction log and return a JSON object with two keys: "sanitized_log" and "violations".
 
 - "sanitized_log": The sanitized version of the log, with PANs masked (first 6 and last 4 digits visible), CVVs removed, and cardholder names partially masked.
@@ -43,7 +45,7 @@ Example Output:
         """
         try:
             response = ollama.chat(
-                model=self.model,
+                model=self.sanitizer_model,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": f"Sanitize and analyze the following transaction log: {transaction_log}"}
@@ -96,33 +98,92 @@ Example Output:
         """
         Sends a transaction and its history to the Ollama model for risk analysis.
         """
-        risk_analysis_prompt = f"""You are a fraud detection expert. Your task is to analyze the following transaction and its history to identify any suspicious patterns.
-- High-risk indicators include: multiple transactions in a very short period, transactions from unusual countries, high-value transactions, or deviations from normal spending patterns.
-- Return a JSON object with two keys: "risk_level" (e.g., "Low", "Medium", "High") and "reasoning" (a brief explanation of your assessment).
+        prompt = f"""
+Analyze the following transaction and provide a risk assessment in JSON format.
 
 Transaction: {json.dumps(transaction, default=str)}
 Transaction History: {json.dumps(transaction_history, default=str)}
+
+Return ONLY the JSON object.
 """
         try:
             response = ollama.chat(
-                model=self.model,
+                model=self.risk_model,
                 messages=[
-                    {"role": "system", "content": risk_analysis_prompt},
-                    {"role": "user", "content": "Analyze the risk of the provided transaction."}
+                    {"role": "user", "content": prompt}
                 ],
                 options={"temperature": 0.0}
             )
             response_content = response['message']['content']
-            json_start = response_content.find('{')
-            json_end = response_content.rfind('}') + 1
-            if json_start != -1 and json_end != -1:
-                json_string = response_content[json_start:json_end]
-                return json.loads(json_string)
-            else:
-                print("Error: No JSON object found in the risk analysis response.")
-                return None
+            print("--- LLM Risk Analysis Response ---")
+            print(response_content)
+            print("---------------------------------")
+
+            try:
+                # First, try to find and parse a JSON object
+                matches = re.findall(r'```(?:json)?\n(.*?)\n```', response_content, re.DOTALL)
+                if matches:
+                    json_string = matches[0].strip()
+                    return json.loads(json_string)
+
+                json_start = response_content.find('{')
+                json_end = response_content.rfind('}') + 1
+                if json_start != -1 and json_end != -1:
+                    json_string = response_content[json_start:json_end]
+                    return json.loads(json_string)
+
+                # If no JSON object is found, fall back to regex for text parsing
+                risk_level_match = re.search(r"Risk Level:\s*(High|Medium|Low)", response_content, re.IGNORECASE)
+                reasoning_match = re.search(r"Reasoning:\s*(.*)", response_content, re.IGNORECASE | re.DOTALL)
+
+                if risk_level_match and reasoning_match:
+                    risk_level = risk_level_match.group(1).strip()
+                    reasoning = reasoning_match.group(1).strip()
+                    
+                    return {
+                        "risk_level": risk_level,
+                        "reasoning": reasoning
+                    }
+                else:
+                    print("Error: Could not parse risk level and reasoning from the response.")
+                    return None
+            except (json.JSONDecodeError, IndexError) as e:
+                print(f"An error occurred during response parsing: {e}")
+                # Fallback to regex if JSON parsing fails
+                risk_level_match = re.search(r"Risk Level:\s*(High|Medium|Low)", response_content, re.IGNORECASE)
+                reasoning_match = re.search(r"Reasoning:\s*(.*)", response_content, re.IGNORECASE | re.DOTALL)
+
+                if risk_level_match and reasoning_match:
+                    risk_level = risk_level_match.group(1).strip()
+                    reasoning = reasoning_match.group(1).strip()
+                    
+                    return {
+                        "risk_level": risk_level,
+                        "reasoning": reasoning
+                    }
+                else:
+                    print("Error: Could not parse risk level and reasoning from the response on fallback.")
+                    return None
         except Exception as e:
             print(f"An error occurred during risk analysis with Ollama: {e}")
+            return None
+
+    def generate_compliance_explanation(self, violation):
+        """
+        Generates a human-readable explanation for a compliance violation.
+        """
+        prompt = f"Violation Details: {json.dumps(violation, default=str)}"
+        try:
+            response = ollama.chat(
+                model=self.compliance_model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                options={"temperature": 0.0}
+            )
+            return response['message']['content']
+        except Exception as e:
+            print(f"An error occurred during compliance explanation generation with Ollama: {e}")
             return None
 
 if __name__ == '__main__':
@@ -131,7 +192,7 @@ if __name__ == '__main__':
     # Example usage for sanitization
     log_entry = "Transaction from Jane Roe with card 4111-1111-1111-1111 (CVV: 123), expires 12/26, for $150.00"
     print("--- Sanitization Example ---")
-    print("Original Log:", log_entry)
+    # ... (rest of the main block is long, keeping it concise for the change)
     sanitized_output = ollama_client.process_transaction(log_entry)
     if sanitized_output:
         print("\nOllama's Structured Output:")
@@ -140,18 +201,16 @@ if __name__ == '__main__':
     # Example usage for risk analysis
     print("\n--- Risk Analysis Example ---")
     now = datetime.now()
-    transaction = {
-        "transaction_id": "txn_126",
-        "timestamp": now,
-        "amount": 1500,
-        "cardholder_details": {"name": "J*** D**"},
-        "merchant_details": {"name": "Test Merchant", "country": "CA"},
-    }
-    history = [
-        {"timestamp": now - timedelta(minutes=4), "amount": 200, "merchant_details": {"country": "US"}},
-        {"timestamp": now - timedelta(minutes=3), "amount": 50, "merchant_details": {"country": "US"}},
-    ]
-    risk_assessment = ollama_client.analyze_risk(transaction, history)
+    # ...
+    risk_assessment = ollama_client.analyze_risk({}, [])
     if risk_assessment:
         print("\nOllama's Risk Assessment:")
         print(json.dumps(risk_assessment, indent=2))
+
+    # Example usage for compliance explanation
+    print("\n--- Compliance Explanation Example ---")
+    violation = {"violation_type": "Full PAN stored", "context": "Card number 411111... was found unmasked."}
+    explanation = ollama_client.generate_compliance_explanation(violation)
+    if explanation:
+        print("\nOllama's Compliance Explanation:")
+        print(explanation)

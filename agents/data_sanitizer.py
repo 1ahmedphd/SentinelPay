@@ -96,25 +96,4 @@ class DataSanitizer:
             for violation in violations:
                 f.write(json.dumps(violation) + '\n')
 
-if __name__ == '__main__':
-    # Regex mode
-    print("--- Regex Sanitization ---")
-    regex_sanitizer = DataSanitizer(mode='regex')
-    log_entry_1 = "Transaction from 4111-1111-1111-1111, amount $100"
-    print("Original: ", log_entry_1)
-    print("Sanitized:", regex_sanitizer.sanitize_transaction(log_entry_1))
-    print("-" * 20)
-
-    # Ollama mode
-    print("\n--- Ollama Sanitization ---")
-    try:
-        ollama_client = OllamaClient()
-        ollama_sanitizer = DataSanitizer(mode='ollama', ollama_client=ollama_client)
-        log_entry_2 = "Payment with card 5412 3456 7890 1234 by John Doe, CVV 456, expires 11/25"
-        print("Original: ", log_entry_2)
-        sanitized_log = ollama_sanitizer.sanitize_transaction(log_entry_2)
-        print("Sanitized:", sanitized_log)
-        print(f"Violations logged to {ollama_sanitizer.violation_log_file}")
-    except Exception as e:
-        print(f"Could not run Ollama sanitization: {e}")
 

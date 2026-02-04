@@ -6,6 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pylatex import Document, Section, Subsection, Tabular, MultiColumn, MultiRow, Command
 from pylatex.utils import italic, NoEscape, bold
 from utils.ollama_client import OllamaClient
+import concurrent.futures
 
 class ComplianceReporter:
     def __init__(self, transactions, violations, ollama_client=None):
@@ -61,18 +62,30 @@ class ComplianceReporter:
             raise ValueError("Ollama client not provided for LLM-enhanced reporting.")
 
         report = self.generate_detailed_violation_report()
-        print(f"--- Debug: Generating LLM explanations for {len(report)} violations. ---")
-        for i, item in enumerate(report):
-            print(f"--- Debug: Getting explanation for violation {i+1}/{len(report)} ---")
-            print(f"--- Debug: Violation details: {item} ---")
-            explanation = self.ollama_client.generate_compliance_explanation(item)
-            if explanation is None:
-                print(f"--- Debug: Failed to get explanation for violation {i+1}. ---")
-                # Handle the case where the explanation is not generated
-                item["llm_explanation"] = "Error: Could not generate explanation."
-            else:
-                print(f"--- Debug: Got explanation for violation {i+1}. ---")
-                item["llm_explanation"] = explanation
+        print(f"--- Debug: Generating LLM explanations for {len(report)} violations using ThreadPoolExecutor. ---")
+
+        def _get_explanation(item_index, violation_item):
+            print(f"--- Debug: Submitting explanation request for violation {item_index+1}/{len(report)} ---")
+            explanation = self.ollama_client.generate_compliance_explanation(violation_item)
+            return item_index, explanation
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_violation = {executor.submit(_get_explanation, i, item): i for i, item in enumerate(report)}
+            
+            for future in concurrent.futures.as_completed(future_to_violation):
+                item_index = future_to_violation[future]
+                try:
+                    original_index, explanation_result = future.result()
+                    if explanation_result is None:
+                        print(f"--- Debug: Failed to get explanation for violation {original_index+1}. ---")
+                        report[original_index]["llm_explanation"] = "Error: Could not generate explanation."
+                    else:
+                        print(f"--- Debug: Got explanation for violation {original_index+1}. ---")
+                        report[original_index]["llm_explanation"] = explanation_result
+                except Exception as exc:
+                    print(f"--- Debug: Violation {item_index+1} generated an exception: {exc} ---")
+                    report[item_index]["llm_explanation"] = f"Error: An exception occurred - {exc}"
+
         print("--- Debug: Finished generating LLM explanations. ---")
         return report
 
@@ -148,15 +161,15 @@ class ComplianceReporter:
 
         # Summary Table
         with doc.create(Section('Violations Summary', numbering=False)):
-            with doc.create(Tabular(r'l l l l')) as table:
-                table.add_row(['Violation ID', 'Transaction ID', 'Violation Type', 'Severity'], mapper=bold)
+            with doc.create(Tabular(r'l l l')) as table:
+                table.add_row(['Transaction ID', 'Violation Type', 'Severity'], mapper=bold)
                 table.add_hline()
                 for item in report_data:
                     severity = item.get("severity_level", "N/A")
                     if severity == "Critical":
-                        row = [item.get("violation_id"), item.get("transaction_id"), item.get("violation_type"), NoEscape(r'\textbf{\textcolor{red}{' + severity + '}}')]
+                        row = [item.get("transaction_id"), item.get("violation_type"), NoEscape(r'\textbf{\textcolor{red}{' + severity + '}}')]
                     else:
-                        row = [item.get("violation_id"), item.get("transaction_id"), item.get("violation_type"), severity]
+                        row = [item.get("transaction_id"), item.get("violation_type"), severity]
                     table.add_row(row)
                 table.add_hline()
 
@@ -165,7 +178,7 @@ class ComplianceReporter:
         # Detailed Explanations
         with doc.create(Section('Detailed Violation Analysis', numbering=False)):
             for item in report_data:
-                with doc.create(Subsection(f'Violation: {item.get("violation_id")} | Transaction: {item.get("transaction_id")}', numbering=False)):
+                with doc.create(Subsection(f'Transaction: {item.get("transaction_id")}', numbering=False)):
                     doc.append(bold("Violation Type: "))
                     doc.append(item.get("violation_type"))
                     doc.append(NoEscape(r'\\'))

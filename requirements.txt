@@ -2,3 +2,4 @@ faker
 ollama
 pylatex
 fpdf
+streamlit

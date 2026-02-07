@@ -73,7 +73,7 @@ def save_transactions_to_json(transactions, filename="transactions.json"):
         json.dump(transactions, f, indent=4)
 
 if __name__ == "__main__":
-    num_records = 2000
+    num_records = 50
     print(f"Generating {num_records} synthetic transactions...")
     synthetic_transactions = generate_transactions(num_records)
     
